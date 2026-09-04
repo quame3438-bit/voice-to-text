@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>语音转文字</title>
+<style>
+:root{
+  --bg:#f5f7fb;
+  --card:#ffffff;
+  --text:#1f2937;
+  --muted:#6b7280;
+  --line:#e5e7eb;
+  --primary:#111827;
+  --soft:#eef2f7;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+.wrap{
+  max-width:760px;
+  margin:0 auto;
+  padding:18px 14px 40px;
+}
+h1{
+  font-size:26px;
+  margin:6px 0 6px;
+}
+.sub{
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.6;
+  margin-bottom:16px;
+}
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:14px;
+  box-shadow:0 4px 18px rgba(0,0,0,.04);
+}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+button,.file-btn{
+  appearance:none;
+  border:0;
+  border-radius:12px;
+  padding:12px 14px;
+  font-size:16px;
+  font-weight:600;
+  cursor:pointer;
+}
+.primary{
+  background:var(--primary);
+  color:#fff;
+}
+.secondary{
+  background:var(--soft);
+  color:var(--text);
+}
+button:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+input[type=file]{display:none}
+.file-btn{
+  display:block;
+  width:100%;
+  text-align:center;
+  background:var(--soft);
+  border:1px dashed #cbd5e1;
+  padding:22px 14px;
+}
+.meta{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.7;
+  word-break:break-all;
+}
+label.small{
+  display:block;
+  font-size:13px;
+  color:var(--muted);
+  margin:8px 0 6px;
+}
+input[type=url],input[type=text],select,textarea{
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:12px;
+  font-size:16px;
+  background:#fff;
+  color:var(--text);
+}
+textarea{
+  min-height:320px;
+  resize:vertical;
+  line-height:1.65;
+}
+.status{
+  margin-top:12px;
+  font-size:14px;
+  color:var(--muted);
+}
+.progress{
+  margin-top:10px;
+  height:8px;
+  background:#edf0f4;
+  border-radius:999px;
+  overflow:hidden;
+  display:none;
+}
+.bar{
+  height:100%;
+  width:0%;
+  background:#111827;
+  transition:width .25s ease;
+}
+.note{
+  font-size:13px;
+  color:var(--muted);
+  line-height:1.65;
+}
+hr{
+  border:0;
+  border-top:1px solid var(--line);
+  margin:14px 0;
+}
+.badge{
+  display:inline-block;
+  font-size:12px;
+  padding:4px 8px;
+  border-radius:999px;
+  background:var(--soft);
+  color:var(--muted);
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>语音转文字</h1>
+  <div class="sub">适合 iPhone / iPad。选择录音文件后上传到你的云端转写接口，返回文字后可直接复制或导出 TXT。</div>
+
+  <div class="card">
+    <label class="file-btn" for="audioFile">
+      选择语音文件
+      <input id="audioFile" type="file" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.mp4,.aac,.flac">
+    </label>
+    <div id="fileMeta" class="meta">支持：m4a / mp3 / wav / mp4 / aac / flac</div>
+
+    <hr>
+
+    <label class="small">识别语言</label>
+    <select id="language">
+      <option value="zh">中文</option>
+      <option value="en">英文</option>
+      <option value="">自动识别</option>
+    </select>
+
+    <label class="small">整理方式</label>
+    <select id="mode">
+      <option value="verbatim">尽量保留原话</option>
+      <option value="clean">自动加标点并整理分段</option>
+      <option value="agriculture">农业技术讲解整理</option>
+    </select>
+
+    <div class="row" style="margin-top:12px">
+      <button id="startBtn" class="primary" disabled>开始转文字</button>
+      <button id="clearBtn" class="secondary">清空</button>
+    </div>
+
+    <div class="progress" id="progress"><div class="bar" id="bar"></div></div>
+    <div class="status" id="status">请选择一个语音文件。</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <strong>转写结果</strong>
+      <span class="badge" id="charCount">0 字</span>
+    </div>
+    <textarea id="result" placeholder="转写完成后，文字会显示在这里……"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button id="copyBtn" class="secondary">复制文字</button>
+      <button id="downloadBtn" class="secondary">导出 TXT</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>接口设置</strong>
+    <div class="note" style="margin-top:6px">
+      GitHub Pages 只是网页前端，不能安全保存转写服务的 API 密钥。
+      请把你的 Supabase Edge Function 或其他转写后端地址填在下面。地址会只保存在当前设备浏览器中。
+    </div>
+    <label class="small">转写接口地址</label>
+    <input id="endpoint" type="url" placeholder="https://xxxx.supabase.co/functions/v1/transcribe">
+    <div class="row" style="margin-top:10px">
+      <button id="saveEndpoint" class="secondary">保存接口地址</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>接口返回格式</strong>
+    <div class="note" style="margin-top:8px">
+      网页会以 <code>multipart/form-data</code> 发送：<code>file</code>、<code>language</code>、<code>mode</code>。<br>
+      接口返回 JSON：<code>{"text":"识别出来的文字"}</code>。
+    </div>
+  </div>
+</div>
+
+<script>
+const audioFile = document.getElementById('audioFile');
+const fileMeta = document.getElementById('fileMeta');
+const startBtn = document.getElementById('startBtn');
+const clearBtn = document.getElementById('clearBtn');
+const result = document.getElementById('result');
+const copyBtn = document.getElementById('copyBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const statusEl = document.getElementById('status');
+const progress = document.getElementById('progress');
+const bar = document.getElementById('bar');
+const endpointInput = document.getElementById('endpoint');
+const saveEndpoint = document.getElementById('saveEndpoint');
+const charCount = document.getElementById('charCount');
+const language = document.getElementById('language');
+const mode = document.getElementById('mode');
+
+endpointInput.value = localStorage.getItem('transcribe_endpoint') || '';
+
+function fmtBytes(bytes){
+  if(bytes < 1024) return bytes + ' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+
+audioFile.addEventListener('change', () => {
+  const f = audioFile.files[0];
+  if(!f){
+    fileMeta.textContent = '支持：m4a / mp3 / wav / mp4 / aac / flac';
+    startBtn.disabled = true;
+    return;
+  }
+  fileMeta.textContent = `文件：${f.name} ｜ 大小：${fmtBytes(f.size)}`;
+  startBtn.disabled = false;
+  statusEl.textContent = '文件已选择，可以开始转写。';
+});
+
+saveEndpoint.addEventListener('click', () => {
+  const v = endpointInput.value.trim();
+  localStorage.setItem('transcribe_endpoint', v);
+  statusEl.textContent = v ? '接口地址已保存。' : '接口地址已清除。';
+});
+
+result.addEventListener('input', () => {
+  charCount.textContent = result.value.length + ' 字';
+});
+
+clearBtn.addEventListener('click', () => {
+  result.value = '';
+  charCount.textContent = '0 字';
+  audioFile.value = '';
+  fileMeta.textContent = '支持：m4a / mp3 / wav / mp4 / aac / flac';
+  startBtn.disabled = true;
+  statusEl.textContent = '已清空。';
+  progress.style.display = 'none';
+  bar.style.width = '0%';
+});
+
+copyBtn.addEventListener('click', async () => {
+  if(!result.value.trim()){
+    statusEl.textContent = '目前没有文字可以复制。';
+    return;
+  }
+  await navigator.clipboard.writeText(result.value);
+  statusEl.textContent = '文字已复制。';
+});
+
+downloadBtn.addEventListener('click', () => {
+  const text = result.value.trim();
+  if(!text){
+    statusEl.textContent = '目前没有文字可以导出。';
+    return;
+  }
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const base = audioFile.files[0]?.name?.replace(/\.[^.]+$/,'') || '语音转文字';
+  a.download = base + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+});
+
+startBtn.addEventListener('click', async () => {
+  const file = audioFile.files[0];
+  const endpoint = endpointInput.value.trim();
+  if(!file){
+    statusEl.textContent = '请先选择语音文件。';
+    return;
+  }
+  if(!endpoint){
+    statusEl.textContent = '请先在下面填写云端转写接口地址。';
+    endpointInput.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  startBtn.disabled = true;
+  progress.style.display = 'block';
+  bar.style.width = '15%';
+  statusEl.textContent = '正在上传语音……';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('language', language.value);
+  fd.append('mode', mode.value);
+
+  try{
+    bar.style.width = '35%';
+    const resp = await fetch(endpoint, {
+      method:'POST',
+      body:fd
+    });
+
+    bar.style.width = '75%';
+
+    let data;
+    try{
+      data = await resp.json();
+    }catch(e){
+      throw new Error('接口没有返回有效 JSON');
+    }
+
+    if(!resp.ok){
+      throw new Error(data?.error || `转写失败（HTTP ${resp.status}）`);
+    }
+
+    const text = data?.text || data?.transcript || '';
+    if(!text){
+      throw new Error('接口返回成功，但没有找到文字内容');
+    }
+
+    result.value = text;
+    charCount.textContent = text.length + ' 字';
+    bar.style.width = '100%';
+    statusEl.textContent = '转写完成。';
+  }catch(err){
+    bar.style.width = '0%';
+    statusEl.textContent = '失败：' + (err.message || err);
+  }finally{
+    startBtn.disabled = false;
+    setTimeout(() => {
+      if(bar.style.width === '100%') progress.style.display = 'none';
+    }, 700);
+  }
+});
+</script>
+</body>
+</html>
