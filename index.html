@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>语音转文字</title>
+<style>
+:root{
+  --bg:#f5f7fb;
+  --card:#ffffff;
+  --text:#1f2937;
+  --muted:#6b7280;
+  --line:#e5e7eb;
+  --primary:#111827;
+  --soft:#eef2f7;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+.wrap{
+  max-width:760px;
+  margin:0 auto;
+  padding:18px 14px 40px;
+}
+h1{
+  font-size:26px;
+  margin:6px 0 6px;
+}
+.sub{
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.6;
+  margin-bottom:16px;
+}
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:14px;
+  box-shadow:0 4px 18px rgba(0,0,0,.04);
+}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+button,.file-btn{
+  appearance:none;
+  border:0;
+  border-radius:12px;
+  padding:12px 14px;
+  font-size:16px;
+  font-weight:600;
+  cursor:pointer;
+}
+.primary{
+  background:var(--primary);
+  color:#fff;
+}
+.secondary{
+  background:var(--soft);
+  color:var(--text);
+}
+button:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+input[type=file]{display:none}
+.file-btn{
+  display:block;
+  width:100%;
+  text-align:center;
+  background:var(--soft);
+  border:1px dashed #cbd5e1;
+  padding:22px 14px;
+}
+.meta{
+  margin-top:10px;
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.7;
+  word-break:break-all;
+}
+label.small{
+  display:block;
+  font-size:13px;
+  color:var(--muted);
+  margin:8px 0 6px;
+}
+input[type=url],input[type=text],input[type=password],select,textarea{
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:12px;
+  font-size:16px;
+  background:#fff;
+  color:var(--text);
+}
+textarea{
+  min-height:320px;
+  resize:vertical;
+  line-height:1.65;
+}
+.status{
+  margin-top:12px;
+  font-size:14px;
+  color:var(--muted);
+}
+.progress{
+  margin-top:10px;
+  height:8px;
+  background:#edf0f4;
+  border-radius:999px;
+  overflow:hidden;
+  display:none;
+}
+.bar{
+  height:100%;
+  width:0%;
+  background:#111827;
+  transition:width .25s ease;
+}
+.note{
+  font-size:13px;
+  color:var(--muted);
+  line-height:1.65;
+}
+hr{
+  border:0;
+  border-top:1px solid var(--line);
+  margin:14px 0;
+}
+.badge{
+  display:inline-block;
+  font-size:12px;
+  padding:4px 8px;
+  border-radius:999px;
+  background:var(--soft);
+  color:var(--muted);
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>语音转文字</h1>
+  <div class="sub">适合 iPhone / iPad。选择录音文件后上传到你的云端转写接口，返回文字后可直接复制或导出 TXT。</div>
+
+  <div class="card">
+    <label class="file-btn" for="audioFile">
+      选择语音文件
+      <input id="audioFile" type="file" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.mp4,.aac,.flac">
+    </label>
+    <div id="fileMeta" class="meta">支持：m4a / mp3 / wav / mp4 / aac / flac</div>
+    <div style="text-align:center;margin:10px 0;color:#9ca3af">或</div>
+    <label class="small">网络音频 / 视频 / YouTube 链接</label>
+    <input id="mediaUrl" type="url" placeholder="https://youtu.be/... 或 https://example.com/video.mp4">
+    <div class="note" style="margin-top:6px">支持 YouTube 视频链接，也支持可直接下载的 MP3 / M4A / MP4 等文件地址。YouTube 会优先读取视频已有字幕/自动字幕。</div>
+
+    <hr>
+
+    <label class="small">识别语言</label>
+    <select id="language">
+      <option value="zh">中文</option>
+      <option value="en">英文</option>
+      <option value="">自动识别</option>
+    </select>
+
+    <label class="small">整理方式</label>
+    <select id="mode">
+      <option value="verbatim">尽量保留原话</option>
+      <option value="clean">自动加标点并整理分段</option>
+      <option value="agriculture">农业技术讲解整理</option>
+    </select>
+
+    <label class="small">接口密码</label>
+    <input id="password" type="password" placeholder="输入你在 Supabase 设置的接口密码" autocomplete="current-password">
+
+    <div class="row" style="margin-top:12px">
+      <button id="startBtn" class="primary">开始转文字</button>
+      <button id="clearBtn" class="secondary">清空</button>
+    </div>
+
+    <div class="progress" id="progress"><div class="bar" id="bar"></div></div>
+    <div class="status" id="status">请选择一个语音文件。</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <strong>转写结果</strong>
+      <span class="badge" id="charCount">0 字</span>
+    </div>
+    <textarea id="result" placeholder="转写完成后，文字会显示在这里……"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button id="copyBtn" class="secondary">复制文字</button>
+      <button id="downloadBtn" class="secondary">导出 TXT</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>使用说明</strong>
+    <div class="note" style="margin-top:8px">本地文件：直接选择后由腾讯云识别。YouTube 链接：直接粘贴视频链接，优先读取视频已有字幕/自动字幕。其他网络文件：粘贴可直接下载的媒体文件地址后识别。腾讯云任务提交后，网页会自动查询结果。</div>
+  </div>
+
+<script>
+const ENDPOINT='https://braarnzywbodyfdclodc.supabase.co/functions/v1/transcribe';
+const $=id=>document.getElementById(id);
+const audioFile=$('audioFile'), mediaUrl=$('mediaUrl'), fileMeta=$('fileMeta');
+const startBtn=$('startBtn'), clearBtn=$('clearBtn'), result=$('result');
+const copyBtn=$('copyBtn'), downloadBtn=$('downloadBtn'), statusEl=$('status');
+const progress=$('progress'), bar=$('bar'), charCount=$('charCount');
+const language=$('language'), mode=$('mode'), password=$('password');
+
+function fmtBytes(bytes){
+  if(bytes < 1024) return bytes+' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(1)+' KB';
+  return (bytes/1024/1024).toFixed(1)+' MB';
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function isYouTubeUrl(url){
+  try{ const h=new URL(url).hostname.toLowerCase(); return h==='youtu.be'||h.endsWith('.youtu.be')||h==='youtube.com'||h.endsWith('.youtube.com')||h==='www.youtube-nocookie.com'||h.endsWith('.youtube-nocookie.com'); }catch{return false}
+}
+function headers(){ return {'X-Transcribe-Password':password.value}; }
+
+audioFile.addEventListener('change',()=>{
+  const f=audioFile.files[0];
+  if(f){
+    mediaUrl.value='';
+    fileMeta.textContent=`文件：${f.name} ｜ 大小：${fmtBytes(f.size)}`;
+    statusEl.textContent='文件已选择，可以开始转写。';
+  }else fileMeta.textContent='支持：m4a / mp3 / wav / mp4 / aac / flac';
+});
+mediaUrl.addEventListener('input',()=>{
+  if(mediaUrl.value.trim()){
+    audioFile.value='';
+    fileMeta.textContent='将使用网络文件链接。';
+    statusEl.textContent=isYouTubeUrl(mediaUrl.value.trim())?'YouTube 链接已填写，可以开始转文字。':'网络文件地址已填写，可以开始转写。';
+  }
+});
+result.addEventListener('input',()=>charCount.textContent=result.value.length+' 字');
+
+clearBtn.addEventListener('click',()=>{
+  result.value=''; charCount.textContent='0 字'; audioFile.value=''; mediaUrl.value='';
+  fileMeta.textContent='支持：m4a / mp3 / wav / mp4 / aac / flac';
+  statusEl.textContent='已清空。'; progress.style.display='none'; bar.style.width='0%';
+});
+copyBtn.addEventListener('click',async()=>{
+  if(!result.value.trim()) return statusEl.textContent='目前没有文字可以复制。';
+  await navigator.clipboard.writeText(result.value); statusEl.textContent='文字已复制。';
+});
+downloadBtn.addEventListener('click',()=>{
+  const text=result.value.trim(); if(!text) return statusEl.textContent='目前没有文字可以导出。';
+  const blob=new Blob([text],{type:'text/plain;charset=utf-8'}), a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  const base=audioFile.files[0]?.name?.replace(/\.[^.]+$/,'') || '语音转文字';
+  a.download=base+'.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+});
+
+async function readJson(resp){
+  let d; try{d=await resp.json()}catch{throw new Error('接口没有返回有效 JSON')}
+  if(!resp.ok) throw new Error(d?.error||`请求失败（HTTP ${resp.status}）`);
+  return d;
+}
+async function poll(taskId, objectPath){
+  for(let i=0;i<180;i++){
+    await sleep(10000);
+    statusEl.textContent=`腾讯云正在识别…… 已等待 ${Math.round((i+1)*10/60*10)/10} 分钟`;
+    bar.style.width=Math.min(92,45+i*.3)+'%';
+    const r=await fetch(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({action:'status',taskId,objectPath})});
+    const d=await readJson(r);
+    if(d.status==='done') return d.text||'';
+    if(d.status==='failed') throw new Error(d.error||'腾讯云识别失败');
+  }
+  throw new Error('等待时间过长，请稍后重新查询');
+}
+startBtn.addEventListener('click',async()=>{
+  const file=audioFile.files[0], url=mediaUrl.value.trim();
+  if(!file && !url) return statusEl.textContent='请选择本地文件，或填写网络媒体文件地址。';
+  if(!password.value) return statusEl.textContent='请输入接口密码。';
+  startBtn.disabled=true; progress.style.display='block'; bar.style.width='10%';
+  try{
+    let resp;
+    if(file){
+      statusEl.textContent='正在上传文件……';
+      const fd=new FormData(); fd.append('file',file); fd.append('language',language.value); fd.append('mode',mode.value);
+      resp=await fetch(ENDPOINT,{method:'POST',headers:headers(),body:fd});
+    }else{
+      const yt=isYouTubeUrl(url);
+      statusEl.textContent=yt?'正在读取 YouTube 字幕……':'正在提交网络文件……';
+      resp=await fetch(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+        body:JSON.stringify({action:yt?'submitYouTube':'submitUrl',url,language:language.value,mode:mode.value})});
+    }
+    const d=await readJson(resp);
+    if(d.text){ result.value=d.text; if(d.source==='youtube') statusEl.textContent='YouTube 字幕读取完成。'; }
+    else if(d.taskId){ bar.style.width='45%'; result.value=await poll(d.taskId,d.objectPath||''); }
+    else throw new Error('没有收到腾讯云任务编号');
+    charCount.textContent=result.value.length+' 字'; bar.style.width='100%'; statusEl.textContent='转写完成。';
+  }catch(e){bar.style.width='0%'; statusEl.textContent='失败：'+(e.message||e);}
+  finally{startBtn.disabled=false;}
+});
+</script>
+</body>
+</html>
