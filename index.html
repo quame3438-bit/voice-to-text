@@ -179,10 +179,13 @@ hr{
     <div class="row" style="margin-top:12px">
       <button id="startBtn" class="primary">开始转文字</button>
       <button id="clearBtn" class="secondary">清空</button>
+      <button id="cancelBtn" class="secondary" disabled>取消任务</button>
     </div>
 
     <div class="progress" id="progress"><div class="bar" id="bar"></div></div>
-    <div class="status" id="status">请选择一个语音文件。</div>
+    <div class="status" id="status" role="status" aria-live="polite">请选择一个语音文件。</div>
+    <div class="note" id="detail" style="margin-top:7px;white-space:pre-wrap"></div>
+    <div class="row" style="margin-top:10px"><button id="retryBtn" class="secondary" style="display:none">继续查询上次任务</button><button id="testBtn" class="secondary">检测接口连接</button></div>
   </div>
 
   <div class="card">
@@ -210,6 +213,12 @@ const startBtn=$('startBtn'), clearBtn=$('clearBtn'), result=$('result');
 const copyBtn=$('copyBtn'), downloadBtn=$('downloadBtn'), statusEl=$('status');
 const progress=$('progress'), bar=$('bar'), charCount=$('charCount');
 const language=$('language'), mode=$('mode'), password=$('password');
+const cancelBtn=$('cancelBtn'), retryBtn=$('retryBtn'), testBtn=$('testBtn'), detail=$('detail');
+let activeController=null, lastTask=null, running=false;
+const setStatus=(msg, extra='')=>{statusEl.textContent=msg;detail.textContent=extra};
+function busy(on){running=on;startBtn.disabled=on;cancelBtn.disabled=!on;retryBtn.disabled=on;testBtn.disabled=on;}
+function failMessage(e){if(e?.name==='AbortError') return '请求已取消或超时。请检查网络后重试。'; if(e instanceof TypeError) return '网络请求失败：请检查网络、Supabase 项目状态、接口地址及跨域(CORS)配置。';return e?.message||String(e);}
+async function request(url,options={},timeout=60000){const ctrl=new AbortController();activeController=ctrl;const timer=setTimeout(()=>ctrl.abort(),timeout);try{return await fetch(url,{...options,signal:ctrl.signal});}finally{clearTimeout(timer);if(activeController===ctrl)activeController=null;}}
 
 function fmtBytes(bytes){
   if(bytes < 1024) return bytes+' B';
@@ -240,6 +249,8 @@ mediaUrl.addEventListener('input',()=>{
 result.addEventListener('input',()=>charCount.textContent=result.value.length+' 字');
 
 clearBtn.addEventListener('click',()=>{
+  if(running){running=false;activeController?.abort();busy(false);}
+  lastTask=null;retryBtn.style.display='none';detail.textContent='';
   result.value=''; charCount.textContent='0 字'; audioFile.value=''; mediaUrl.value='';
   fileMeta.textContent='支持：m4a / mp3 / wav / mp4 / aac / flac';
   statusEl.textContent='已清空。'; progress.style.display='none'; bar.style.width='0%';
@@ -257,48 +268,88 @@ downloadBtn.addEventListener('click',()=>{
 });
 
 async function readJson(resp){
-  let d; try{d=await resp.json()}catch{throw new Error('接口没有返回有效 JSON')}
-  if(!resp.ok) throw new Error(d?.error||`请求失败（HTTP ${resp.status}）`);
+  const raw=await resp.text(); let d;
+  try{d=JSON.parse(raw)}catch{throw new Error(`接口返回非 JSON（HTTP ${resp.status}）：${raw.slice(0,180)||'空响应'}`)}
+  if(!resp.ok) throw new Error((typeof d?.error==='string'?d.error:d?.message)||`请求失败（HTTP ${resp.status}）`);
   return d;
 }
 async function poll(taskId, objectPath){
+  let networkFailures=0;
   for(let i=0;i<180;i++){
-    await sleep(10000);
-    statusEl.textContent=`腾讯云正在识别…… 已等待 ${Math.round((i+1)*10/60*10)/10} 分钟`;
+    if(!running) throw new Error('已取消查询');
+    setStatus(`腾讯云正在识别…… 已等待 ${((i+1)*10/60).toFixed(1)} 分钟`, '每10秒自动查询一次；若网络异常，将自动重试。');
     bar.style.width=Math.min(92,45+i*.3)+'%';
-    const r=await fetch(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-      body:JSON.stringify({action:'status',taskId,objectPath})});
-    const d=await readJson(r);
-    if(d.status==='done') return d.text||'';
-    if(d.status==='failed') throw new Error(d.error||'腾讯云识别失败');
+    await sleep(10000);
+    if(!running) throw new Error('已取消查询');
+    try{
+      const r=await request(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({action:'status',taskId,objectPath})},25000);
+      const d=await readJson(r);networkFailures=0;
+      if(d.status==='done'||d.status==='completed'||d.status==='success') return d.text??d.result?.text??'';
+      if(d.status==='failed'||d.status==='error') throw new Error(d.error||'腾讯云识别失败');
+      if(d.text) return d.text;
+    }catch(e){
+      if(!running) throw new Error('已取消查询');
+      if(/识别失败|HTTP 40[0134]|HTTP 5|密码|unauthorized/i.test(e.message||'')) throw e;
+      networkFailures++;
+      setStatus(`查询暂时失败，正在重试（${networkFailures}/3）`,failMessage(e));
+      if(networkFailures>=3) throw new Error('连续3次查询失败：'+failMessage(e));
+    }
   }
-  throw new Error('等待时间过长，请稍后重新查询');
+  throw new Error('查询超过30分钟；可使用「继续查询上次任务」，不必重新上传。');
 }
-startBtn.addEventListener('click',async()=>{
+async function finishTask(task){
+  const text=await poll(task.taskId,task.objectPath);
+  result.value=text;charCount.textContent=text.length+' 字';bar.style.width='100%';
+  setStatus(text?'转写完成。':'任务已完成，但接口返回空文字。');
+  lastTask=null;retryBtn.style.display='none';
+}
+async function execute(action){
+  if(running) return;
+  if(!password.value.trim()) return setStatus('请输入接口密码。');
+  busy(true);progress.style.display='block';bar.style.width='10%';detail.textContent='';
+  try{await action();}
+  catch(e){bar.style.width='0%';setStatus('失败：'+failMessage(e),lastTask?'识别任务编号已保留，可点击「继续查询上次任务」。':'如果接口已暂停或未部署，需要先恢复云端服务。');}
+  finally{busy(false);retryBtn.style.display=lastTask?'inline-block':'none';}
+}
+startBtn.addEventListener('click',()=>{
   const file=audioFile.files[0], url=mediaUrl.value.trim();
-  if(!file && !url) return statusEl.textContent='请选择本地文件，或填写网络媒体文件地址。';
-  if(!password.value) return statusEl.textContent='请输入接口密码。';
-  startBtn.disabled=true; progress.style.display='block'; bar.style.width='10%';
-  try{
+  if(!file&&!url) return setStatus('请选择本地文件，或填写网络媒体文件地址。');
+  execute(async()=>{
+    lastTask=null;retryBtn.style.display='none';
     let resp;
     if(file){
-      statusEl.textContent='正在上传文件……';
-      const fd=new FormData(); fd.append('file',file); fd.append('language',language.value); fd.append('mode',mode.value);
-      resp=await fetch(ENDPOINT,{method:'POST',headers:headers(),body:fd});
+      setStatus('正在上传文件……',`文件大小：${fmtBytes(file.size)}；最多等待120秒。`);
+      const fd=new FormData();fd.append('file',file);fd.append('language',language.value);fd.append('mode',mode.value);
+      resp=await request(ENDPOINT,{method:'POST',headers:headers(),body:fd},120000);
     }else{
       const yt=isYouTubeUrl(url);
-      statusEl.textContent=yt?'正在读取 YouTube 字幕……':'正在提交网络文件……';
-      resp=await fetch(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-        body:JSON.stringify({action:yt?'submitYouTube':'submitUrl',url,language:language.value,mode:mode.value})});
+      setStatus(yt?'正在读取 YouTube 字幕……':'正在提交网络文件……','接口响应最多等待60秒。');
+      resp=await request(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({action:yt?'submitYouTube':'submitUrl',url,language:language.value,mode:mode.value})},60000);
     }
     const d=await readJson(resp);
-    if(d.text){ result.value=d.text; if(d.source==='youtube') statusEl.textContent='YouTube 字幕读取完成。'; }
-    else if(d.taskId){ bar.style.width='45%'; result.value=await poll(d.taskId,d.objectPath||''); }
-    else throw new Error('没有收到腾讯云任务编号');
-    charCount.textContent=result.value.length+' 字'; bar.style.width='100%'; statusEl.textContent='转写完成。';
-  }catch(e){bar.style.width='0%'; statusEl.textContent='失败：'+(e.message||e);}
-  finally{startBtn.disabled=false;}
+    if(typeof d.text==='string'){
+      result.value=d.text;charCount.textContent=d.text.length+' 字';bar.style.width='100%';
+      setStatus(d.text?'转写完成。':'接口返回成功，但文字为空。');
+    }else if(d.taskId){
+      lastTask={taskId:d.taskId,objectPath:d.objectPath||''};bar.style.width='45%';
+      await finishTask(lastTask);
+    }else throw new Error('接口未返回文字或任务编号。响应字段：'+Object.keys(d).join(', '));
+  });
 });
+retryBtn.addEventListener('click',()=>{if(lastTask)execute(()=>finishTask(lastTask));});
+cancelBtn.addEventListener('click',()=>{running=false;activeController?.abort();busy(false);setStatus('已停止当前操作。',lastTask?'任务编号已保留，可以继续查询。':'');retryBtn.style.display=lastTask?'inline-block':'none';});
+testBtn.addEventListener('click',async()=>{
+  if(running)return;
+  setStatus('正在检测接口连接……','此检测只检查网络与接口是否响应，不保证腾讯云转写服务正常。');
+  testBtn.disabled=true;
+  try{
+    const r=await request(ENDPOINT,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({action:'status',taskId:'connectivity-test'})},15000);
+    const raw=(await r.text()).slice(0,250);
+    setStatus(`接口已响应（HTTP ${r.status}）`,r.ok?'接口可以连接；转写仍需实际测试。':'服务器已响应但返回错误；可能是测试任务不存在或接口密码/配置问题。 '+raw);
+  }catch(e){setStatus('接口连接失败：'+failMessage(e));}
+  finally{testBtn.disabled=false;}
+});
+
 </script>
 </body>
 </html>
